@@ -6,10 +6,16 @@ app.http("saveGamesCSV", {
   authLevel: "anonymous",
   handler: async (request, context) => {
     try {
-      const { gameKey, csv } = await request.json();
 
-      if (!gameKey || !csv) {
-        return { status: 400, body: "Missing gameKey or csv" };
+      const {
+        gameKey,
+        configCSV,
+        contentCSV,
+        contentType
+      } = await request.json();
+
+      if (!gameKey || !configCSV) {
+        return { status: 400, body: "Missing data" };
       }
 
       const blobServiceClient =
@@ -22,13 +28,15 @@ app.http("saveGamesCSV", {
 
       await containerClient.createIfNotExists();
 
-      const blobPath = `current/games/${gameKey}/config.csv`;
+      // write config csv
+      const configPath =
+        `current/games/${gameKey}/config.csv`;
 
-      const blobClient =
-        containerClient.getBlockBlobClient(blobPath);
+      const configBlob =
+        containerClient.getBlockBlobClient(configPath);
 
-      await blobClient.uploadData(
-        Buffer.from(csv),
+      await configBlob.uploadData(
+        Buffer.from(configCSV),
         {
           blobHTTPHeaders: {
             blobContentType: "text/csv; charset=utf-8"
@@ -36,6 +44,26 @@ app.http("saveGamesCSV", {
           overwrite: true
         }
       );
+
+      // Write content csv
+      if (contentCSV && contentType) {
+
+        const contentPath =
+          `current/games/${gameKey}/${contentType}.csv`;
+
+        const contentBlob =
+          containerClient.getBlockBlobClient(contentPath);
+
+        await contentBlob.uploadData(
+          Buffer.from(contentCSV),
+          {
+            blobHTTPHeaders: {
+              blobContentType: "text/csv; charset=utf-8"
+            },
+            overwrite: true
+          }
+        );
+      }
 
       return {
         status: 200,
