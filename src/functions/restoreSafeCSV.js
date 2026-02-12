@@ -7,10 +7,9 @@ app.http("restoreSafeCSV", {
   handler: async (request, context) => {
     try {
       const { target } = await request.json();
-      // target: "GameData" | "AdminData"
 
-      if (!["GameData", "AdminData"].includes(target)) {
-        return { status: 400, body: "Invalid restore target" };
+      if (!target) {
+        return { status: 400, body: "Missing target" };
       }
 
       const blobServiceClient =
@@ -21,26 +20,74 @@ app.http("restoreSafeCSV", {
       const container =
         blobServiceClient.getContainerClient("lessondata");
 
-      const sourceBlob =
-        container.getBlockBlobClient(`safe/${target}.csv`);
+      // ========= Admin =========
+      if (target === "AdminData") {
 
-      const destBlob =
-        container.getBlockBlobClient(`current/${target}.csv`);
+        const sourceBlob =
+          container.getBlockBlobClient(`safe/AdminData.csv`);
 
-      const download = await sourceBlob.download();
-      const buffer = await streamToBuffer(download.readableStreamBody);
+        const destBlob =
+          container.getBlockBlobClient(`current/AdminData.csv`);
 
-      await destBlob.uploadData(buffer, {
-        overwrite: true,
-        blobHTTPHeaders: {
-          blobContentType: "text/csv; charset=utf-8"
-        }
-      });
+        const download = await sourceBlob.download();
+        const buffer = await streamToBuffer(download.readableStreamBody);
 
-      return {
-        status: 200,
-        jsonBody: { ok: true, restored: target }
-      };
+        await destBlob.uploadData(buffer, {
+          overwrite: true,
+          blobHTTPHeaders: {
+            blobContentType: "text/csv; charset=utf-8"
+          }
+        });
+
+        return { status: 200 };
+      }
+
+      // ========= Games =========
+      const safePrefix =
+        `safe/games/${target}/`;
+
+      const currentPrefix =
+        `current/games/${target}/`;
+
+      let found = false;
+
+      for await (const blob of container.listBlobsFlat({
+        prefix: safePrefix
+      })) {
+
+        found = true;
+
+        const fileName =
+          blob.name.replace(safePrefix, "");
+
+        const safeBlob =
+          container.getBlockBlobClient(blob.name);
+
+        const currentBlob =
+          container.getBlockBlobClient(
+            currentPrefix + fileName
+          );
+
+        const download =
+          await safeBlob.download();
+
+        const buffer =
+          await streamToBuffer(download.readableStreamBody);
+
+        await currentBlob.uploadData(buffer, {
+          overwrite: true,
+          blobHTTPHeaders: {
+            blobContentType: "text/csv; charset=utf-8"
+          }
+        });
+      }
+
+      if (!found) {
+        return { status: 400, body: "No safe version found" };
+      }
+
+      return { status: 200 };
+
     } catch (err) {
       context.log(err);
       return { status: 500, body: String(err) };
