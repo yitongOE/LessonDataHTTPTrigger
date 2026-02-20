@@ -20,57 +20,22 @@ app.http("restoreSafeCSV", {
       const container =
         blobServiceClient.getContainerClient("lessondata");
 
-      // ========= Admin =========
+      // =========================
+      // ===== Admin Restore =====
+      // =========================
       if (target === "AdminData") {
 
-        const sourceBlob =
-          container.getBlockBlobClient(`safe/AdminData.csv`);
-
-        const destBlob =
-          container.getBlockBlobClient(`current/AdminData.csv`);
-
-        const download = await sourceBlob.download();
-        const buffer = await streamToBuffer(download.readableStreamBody);
-
-        await destBlob.uploadData(buffer, {
-          overwrite: true,
-          blobHTTPHeaders: {
-            blobContentType: "text/csv; charset=utf-8"
-          }
-        });
-
-        return { status: 200 };
-      }
-
-      // ========= Games =========
-      const safePrefix =
-        `safe/games/${target}/`;
-
-      const currentPrefix =
-        `current/games/${target}/`;
-
-      let found = false;
-
-      for await (const blob of container.listBlobsFlat({
-        prefix: safePrefix
-      })) {
-
-        found = true;
-
-        const fileName =
-          blob.name.replace(safePrefix, "");
-
         const safeBlob =
-          container.getBlockBlobClient(blob.name);
+          container.getBlockBlobClient("safe/AdminData.csv");
 
         const currentBlob =
-          container.getBlockBlobClient(
-            currentPrefix + fileName
-          );
+          container.getBlockBlobClient("current/AdminData.csv");
 
-        const download =
-          await safeBlob.download();
+        if (!(await safeBlob.exists())) {
+          return { status: 400, body: "No safe AdminData found" };
+        }
 
+        const download = await safeBlob.download();
         const buffer =
           await streamToBuffer(download.readableStreamBody);
 
@@ -80,13 +45,112 @@ app.http("restoreSafeCSV", {
             blobContentType: "text/csv; charset=utf-8"
           }
         });
+
+        return { status: 200 };
       }
 
-      if (!found) {
-        return { status: 400, body: "No safe version found" };
+      // =========================
+      // ===== Typed Restore =====
+      // =========================
+      // Expected:
+      // "games/WordSplash"
+      // "marketplace/WordSplash"
+
+      if (!target.includes("/")) {
+        return { status: 400, body: "Invalid target format" };
       }
 
-      return { status: 200 };
+      const [type, key] = target.split("/");
+
+      if (!type || !key) {
+        return { status: 400, body: "Invalid target format" };
+      }
+
+      if (type !== "games" && type !== "marketplace") {
+        return { status: 400, body: "Invalid target type" };
+      }
+
+      const baseSafe =
+        `safe/${type}/${key}/`;
+
+      const baseCurrent =
+        `current/${type}/${key}/`;
+
+      // =========================
+      // ===== Games Panel =====
+      // =========================
+      if (type === "games") {
+
+        const files = ["config.csv", "content.csv"];
+
+        for (const file of files) {
+
+          const safePath = baseSafe + file;
+          const currentPath = baseCurrent + file;
+
+          const safeBlob =
+            container.getBlockBlobClient(safePath);
+
+          if (!(await safeBlob.exists())) continue;
+
+          const currentBlob =
+            container.getBlockBlobClient(currentPath);
+
+          const download =
+            await safeBlob.download();
+
+          const buffer =
+            await streamToBuffer(download.readableStreamBody);
+
+          await currentBlob.uploadData(buffer, {
+            overwrite: true,
+            blobHTTPHeaders: {
+              blobContentType: "text/csv; charset=utf-8"
+            }
+          });
+        }
+
+        return { status: 200 };
+      }
+
+      // =========================
+      // ===== Marketplace Panel =====
+      // =========================
+      if (type === "marketplace") {
+
+        const files = ["config.csv", "selected.csv"];
+
+        for (const file of files) {
+
+          const safePath = baseSafe + file;
+          const currentPath = baseCurrent + file;
+
+          const safeBlob =
+            container.getBlockBlobClient(safePath);
+
+          if (!(await safeBlob.exists())) continue;
+
+          const currentBlob =
+            container.getBlockBlobClient(currentPath);
+
+          const download =
+            await safeBlob.download();
+
+          const buffer =
+            await streamToBuffer(download.readableStreamBody);
+
+          await currentBlob.uploadData(buffer, {
+            overwrite: true,
+            blobHTTPHeaders: {
+              blobContentType: "text/csv; charset=utf-8"
+            }
+          });
+        }
+
+        return { status: 200 };
+      }
+
+      return { status: 400, body: "Unhandled restore case" };
 
     } catch (err) {
       context.log(err);
@@ -95,7 +159,11 @@ app.http("restoreSafeCSV", {
   }
 });
 
-// helper
+
+// =========================
+// ===== Helpers =====
+// =========================
+
 async function streamToBuffer(readableStream) {
   return new Promise((resolve, reject) => {
     const chunks = [];
